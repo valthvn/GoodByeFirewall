@@ -89,7 +89,7 @@ Redirects UDP port 53 DNS queries to prevent DNS hijacking and poisoning:
 ### Instructions
 ```bash
 # Clone repository
-git clone https://github.com/Aiyzoxx/GoodByeFirewall.git
+git clone https://github.com/valthvn/GoodByeFirewall.git
 cd GoodByeFirewall
 
 # Install dependencies
