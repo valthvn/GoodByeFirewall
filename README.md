@@ -69,8 +69,18 @@ Redirects UDP port 53 DNS queries to prevent DNS hijacking and poisoning:
 - **Custom DNS** — Custom IPv4 address and port
 
 ### Operating Modes
-- **Direct Session**: Spawns a background daemon (`goodbyefirewall-daemon.exe`) that runs alongside the application. Terminating the app cleanly stops the daemon and releases the driver.
-- **Windows Service**: Installs GoodByeFirewall as a native Windows service via `sc.exe`, providing automatic startup on boot without requiring the UI.
+- **Direct Session**: Spawns a background daemon (`goodbyefirewall-daemon.exe`) that runs alongside the application. Quitting the app stops only its own daemon. A Windows Job also cleans up that child if the UI process crashes.
+- **Windows Service**: Installs the application as a native Windows service host (`--service`), providing automatic startup on boot without requiring the UI. The host verifies and monitors its daemon and reports RUNNING only after filter activation. Quitting the UI leaves the service running; use the protection toggle to stop it.
+
+### Installation and legacy service migration
+
+Production builds require a protected installation in **Program Files**. The NSIS installer now installs for all users. The daemon, WinDivert DLL and driver must match the hashes pinned in the client. Updating those binaries requires updating the pins after verifying their provenance. Debug builds use the fixed repository engine directory.
+
+The app manages only its own child process and services whose executable belongs to this installation. It preserves the shared WinDivert driver. Use **Migrate legacy service** to remove an older `GoodbyeDPI` service belonging to this installation, then activate Windows Service mode. A service belonging to a different installation is refused and must be managed through that installation.
+
+Administrator access is required for filtering. Remembered elevation is enabled only for protected executables; development or user-writable installations require UAC. The optional `setup-skip-uac.ps1` script also requires an elevated shell and refuses a foreign scheduled task.
+
+Custom arguments follow Windows quoting rules; for example, `--blacklist "C:\My lists\blocked.txt"` preserves a path containing spaces. They are passed directly to the daemon, without a shell.
 
 ### System Tray & Notifications
 - Closing the window minimizes the app to the Windows system tray.
@@ -106,6 +116,18 @@ The compiled installer is output to:
 `src-tauri/target/release/bundle/nsis/GoodByeFirewall_1.0.1_x64-setup.exe`
 
 ---
+
+## Verification
+
+`npm test` runs renderer regressions with simulated DOM/IPC. On Windows, run:
+
+```powershell
+cargo test --locked --manifest-path src-tauri/Cargo.toml
+cargo clippy --locked --all-targets --manifest-path src-tauri/Cargo.toml -- -D warnings
+cargo fmt --manifest-path src-tauri/Cargo.toml --check
+```
+
+These tests do not modify system services or load the network driver. See [REVIEW.md](REVIEW.md) for findings, changes, measured renderer improvements and remaining native validation requirements.
 
 ## License & Attribution
 

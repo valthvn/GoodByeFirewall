@@ -1,107 +1,94 @@
-# Revue et optimisations — 7 octobre 2026
+# Revue et corrections — 7 octobre 2026
 
-Revue du client Tauri/Rust et du renderer JavaScript sur `codex/review-optimizations`.
-Les binaires `BinTools` ne sont pas accompagnés de leurs sources : leur logique
-de filtrage, leurs performances et leur intégrité n'ont pas été auditées.
+Les six groupes de problèmes restant dans la première revue ont été corrigés
+sur la branche `codex/review-optimizations`. Le client Tauri/Rust, le renderer
+JavaScript et le script d'élévation sont concernés.
 
-## Corrections apportées
+## Corrections
 
-- **P1 — Faux succès du mode service.** `start_bypass` ignorait les erreurs de
-  lancement de `sc.exe` et annonçait systématiquement la protection active après
-  300 ms. Les commandes sont maintenant contrôlées, leurs diagnostics stdout et
-  stderr conservés, et le succès nécessite l'état service numérique 4 (RUNNING),
-  avec une attente limitée à cinq secondes. Les options `binPath=` et `start=`
-  passent séparément de leurs valeurs, conformément à la documentation Microsoft.
-- **P2 — Mode service oublié au démarrage du client.** L'état backend était
-  initialisé à `false` même si la configuration enregistrée utilisait un service.
-  Il est maintenant initialisé depuis la configuration avant le premier contrôle.
-  Appliquer la langue au chargement ne sauvegarde plus une configuration encore
-  partiellement restaurée, qui pouvait remplacer le mode service par `false`.
-- **P2 — Configuration périmée dans le tray.** L'activation recharge maintenant
-  la configuration enregistrée au lieu de conserver celle chargée précédemment.
-- **P2 — Écritures concurrentes et excessives des paramètres.** La sauvegarde
-  attend 250 ms après la dernière modification et sérialise les écritures. Une
-  modification pendant une écriture reste en attente. Les erreurs sont journalisées.
-  Les actions de démarrage, d'élévation et de fermeture du dialogue administrateur
-  attendent la sauvegarde ; masquer la fenêtre ou perdre le focus la déclenche.
-- **P2 — Console coûteuse sous une rafale de logs.** Le buffer reste limité à
-  500 lignes, mais son affichage est regroupé sur une fenêtre de 100 ms.
-- **P2 — Lecture des pipes.** `lines().flatten()` pouvait poursuivre indéfiniment
-  après des erreurs répétées de lecture ; `map_while(Result::ok)` arrête la lecture
-  à la première erreur.
+1. **Propriété des processus et services.** Aucun `taskkill` global, aucune
+   suppression du pilote WinDivert partagé. Seul l'enfant créé par ce client
+   est arrêté ; un Job Windows le termine aussi en cas de disparition du parent.
+   Chaque modification de service vérifie le chemin canonique de son exécutable.
+   La migration du service `GoodbyeDPI` est une action explicite et refuse les
+   installations étrangères.
+2. **Chargement privilégié.** Les builds de production utilisent uniquement
+   les ressources installées, jamais le répertoire courant. Les SHA-256 du
+   daemon, de sa DLL et du pilote sont vérifiés. Les propriétaires et ACL des
+   fichiers et répertoires doivent empêcher toute modification par un utilisateur
+   non administrateur. L'installateur est désormais `perMachine` dans Program
+   Files. Le script et la tâche d'élévation refusent les exécutables modifiables
+   et les tâches appartenant à une autre installation ; les outils système
+   sont résolus dans System32 plutôt que via PATH.
+3. **État réel et fermeture.** Le lancement attend une confirmation du filtre,
+   avec un délai maximal de dix secondes et contrôle du processus. Un observateur
+   WinDivert REFLECT en lecture seule confirme le dernier filtre NETWORK du
+   PID enfant même quand la sortie C est mise en tampon ; il ne capture pas de
+   paquets réseau. La disparition du processus ou du filtre met l'interface à
+   jour. Le service utilise désormais un véritable hôte SCM (`--service`),
+   annonce RUNNING seulement après activation et surveille son moteur. Quitter
+   l'interface arrête une session directe et conserve un service autonome.
+4. **Erreurs et désinstallation.** Les API natives SCM remplacent l'analyse de
+   texte localisé de `sc.exe`. Arrêt, démarrage, suppression et délais d'attente
+   propagent leurs erreurs. Une suppression est confirmée avant le succès.
+   Les fenêtres principale et tray interrogent l'état réel après un échec.
+5. **Concurrence et écritures.** Les opérations bloquantes passent par
+   `spawn_blocking`. Toutes les fenêtres partagent un verrou de cycle de vie
+   backend ; les commandes en attente sont refusées après fermeture. Le port
+   d'instance est réservé avant la création des fenêtres pour empêcher deux
+   lancements simultanés de contourner ce verrou. Les
+   sauvegardes sont sérialisées, regroupées et remplacées atomiquement sous
+   Windows. Une erreur initiale de configuration ou de statut est journalisée
+   sans interrompre l'installation des contrôles de la fenêtre principale.
+6. **Entrées et CSP.** Validation Rust des presets, TTL 1–255, IPv4 et port
+   1–65535. Les arguments utilisent les règles Windows, conservent les chemins
+   entre guillemets et ne passent pas par un shell. Les guillemets non fermés,
+   caractères de contrôle et chaînes excessives sont rejetés. La CSP limite
+   scripts, images et IPC ; les gestionnaires HTML inline ont été retirés.
 
-## Points restant à corriger, par priorité
+Le backend est réparti en modules de configuration, chemins, contrôleur,
+processus, observation WinDivert, SCM, hôte de service et commandes Tauri.
 
-1. **P1 — Arrêt global de logiciels tiers** (`src-tauri/src/lib.rs`,
-   `stop_all_goodbyefirewall`, `uninstall_service`). Le client tue tous les
-   `goodbyedpi.exe` et supprime le service GoodbyeDPI ainsi que le pilote WinDivert,
-   qui peuvent être utilisés par un autre logiciel. Gérer uniquement le PID enfant
-   et le service appartenant à l'application. Conserver une migration explicite
-   pour les anciennes installations. Différé : la politique de compatibilité et
-   de propriété du pilote doit être définie avant de modifier ce comportement.
-2. **P1 — Recherche de binaire dans le répertoire courant** (`get_executable_path`).
-   Un lancement élevé depuis un dossier contenant un faux `BinTools` pourrait
-   exécuter ce binaire. Limiter les chemins de production aux ressources installées,
-   vérifier les droits du répertoire et réserver les chemins de développement aux
-   builds debug. Différé : il faut valider les emplacements installés et les ACL
-   de l'installateur ; aucune exploitation n'a été exécutée.
-3. **P2 — État de protection et cycle de vie incomplets** (`start_bypass`,
-   `check_status`, `quit_app`). Le lancement direct annonce le succès dès `spawn`,
-   sans confirmation du chargement WinDivert. La mort du daemon n'est pas surveillée
-   en continu. Quitter arrête également le service malgré son usage autonome décrit
-   dans le README. Ajouter un moniteur du processus, une confirmation du moteur et
-   une politique explicite pour quitter en mode service. Différé : le protocole du
-   moteur n'est pas documenté et le comportement de fermeture change l'usage.
-4. **P2 — Désinstallation annoncée réussie malgré un échec** (`uninstall_service`).
-   Les résultats de `sc delete/stop` sont ignorés. Agréger les erreurs et confirmer
-   la suppression avant d'afficher un succès. Différé avec la correction de
-   propriété du service et du pilote ci-dessus.
-5. **P2 — Opérations bloquantes et commandes simultanées** (`start_bypass`,
-   `stop_bypass`, `check_status`). Des commandes système et `thread::sleep` bloquent
-   le thread d'exécution. Le garde JavaScript d'une fenêtre n'empêche pas une autre
-   fenêtre de lancer une opération concurrente. Utiliser `spawn_blocking` et un
-   verrou backend commun aux opérations du cycle de vie. Différé : nécessite un
-   changement coordonné du modèle d'état et des tests de concurrence backend.
-6. **P2 — Entrées et frontière de sécurité.** Le DNS personnalisé est filtré par
-   caractères au lieu d'être validé comme IPv4, le port n'est pas borné à 1–65535,
-   et les arguments libres ne prennent pas en charge les chemins avec espaces.
-   La CSP est désactivée (`src-tauri/tauri.conf.json`) alors que le client peut être
-   élevé. Valider avec les types Rust et activer une CSP adaptée aux ressources et
-   à l'IPC Tauri. Différé : couvrir d'abord la compatibilité des arguments libres
-   et vérifier la CSP dans WebView2 ; aucune injection n'a été observée.
+## Optimisations mesurées
 
-## Mesures reproductibles
-
-Tests exécutant le véritable JavaScript du renderer dans Node, avec DOM, timers
-et IPC simulés. Les nombres décrivent le travail demandé aux frontières DOM/IPC,
-pas un gain de débit réseau ou une mesure CPU de l'application native.
+Mesures avec le véritable JavaScript et des frontières DOM/IPC simulées.
+Elles ne représentent pas un gain de débit réseau ni une mesure CPU native.
 
 | Scénario | Avant | Après |
 |---|---:|---:|
-| Rafale de 1 000 logs dans une même fenêtre de 100 ms | 1 000 réécritures de console | 1 |
-| 20 modifications de paramètres espacées de moins de 250 ms | 20 sauvegardes IPC | 1 |
-| Deux modifications avec une sauvegarde encore en cours | Écritures concurrentes | Écritures sérialisées, dernière valeur conservée |
+| 1 000 logs en 100 ms | 1 000 réécritures de console | 1 |
+| 20 modifications en moins de 250 ms | 20 sauvegardes IPC | 1 |
+| Modification pendant une sauvegarde | Écritures concurrentes | Dernière valeur conservée, écritures sérialisées |
 
-Les affichages de logs ont désormais un retard maximal de regroupement de 100 ms
-hors ralentissement du thread ; la sauvegarde automatique introduit 250 ms après
-la saisie. Une fermeture forcée du processus peut perdre des modifications en attente.
+La console conserve 500 lignes. Les regroupements ajoutent au plus 100 ms pour
+les logs et 250 ms après une saisie pour les paramètres, hors ralentissement du
+thread. Une fermeture forcée peut perdre une modification encore en attente.
 
-## Validation
+## Validation et limites
 
-- `npm test` : **7 tests réussis** : buffer, sauvegardes regroupées,
-  sérialisation, échec de sauvegarde, flush vide, restauration du mode service
-  et actualisation de configuration du tray.
-- `cargo test --locked --manifest-path src-tauri/Cargo.toml` : compilation réussie,
-  **2 tests Rust réussis**, sur les sorties de commandes service et l'état numérique
-  en anglais/français.
-- `node --check renderer/app.js` et `node --check renderer/tray.js`.
-- Vérification navigateur tentée avec `node tests/preview-server.cjs` (backend
-  Tauri simulé). Le navigateur intégré ne peut pas joindre le serveur local :
-  `net::ERR_CONNECTION_TIMED_OUT`. Vérification visuelle non validée.
-- Aucun daemon, service, pilote ni tâche d'élévation n'a été lancé pour ces tests.
-  Le fonctionnement natif administrateur et le contournement DPI restent à tester.
+- `npm test` : **11 tests JavaScript réussis**, dont les échecs de démarrage et
+  d'arrêt dans les deux fenêtres et les sauvegardes concurrentes.
+- `cargo test --offline --locked --manifest-path src-tauri/Cargo.toml` :
+  **23 tests Rust**, couvrant paramètres, quoting Windows, SCM simulé,
+  concurrence, processus de test réels, Job Windows, empreintes et ACL.
+- Compilation du client Windows avec `cargo build --offline --locked`.
+- Clippy sur toutes les cibles avec `-D warnings`, rustfmt et syntaxe JavaScript.
+- Le test de DLL appelle uniquement `WinDivertHelperFormatFilter`. Aucun test
+  n'ouvre le pilote, ne démarre le daemon réseau, ni ne modifie un service ou
+  une tâche planifiée du système. Les processus réels sont des fixtures PowerShell.
+- La vérification visuelle locale reste indisponible : le navigateur intégré
+  échoue avec `ERR_CONNECTION_TIMED_OUT` et Chrome n'est pas disponible.
+  Le serveur de prévisualisation simule Tauri et applique la CSP du projet.
+- Le chargement WinDivert avec privilèges, le démarrage au boot, l'installateur
+  Program Files et le rendu CSP dans WebView2 nécessitent une validation native.
+  Les sources des binaires embarqués ne sont pas incluses ; les empreintes
+  détectent un remplacement et ne constituent pas un audit du moteur lui-même.
 
-## Références officielles
+## Références
 
-- [Syntaxe sc.exe create](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/sc-create)
-- [Commandes Rust Tauri et exécution asynchrone](https://v2.tauri.app/develop/calling-rust/)
+- [CommandLineToArgvW](https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-commandlinetoargvw)
+- [QueryServiceConfigW](https://learn.microsoft.com/en-us/windows/win32/api/winsvc/nf-winsvc-queryserviceconfigw)
+- [WinDivert REFLECT et format des filtres](https://reqrypt.org/windivert-doc.html)
+- [GoodbyeDPI : ordre d'ouverture des filtres](https://github.com/ValdikSS/GoodbyeDPI/blob/master/src/goodbyedpi.c)
+- [CSP Tauri](https://v2.tauri.app/security/csp/)
+- [Commandes Rust Tauri](https://v2.tauri.app/develop/calling-rust/)
