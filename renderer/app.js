@@ -23,8 +23,10 @@ const i18n = {
     driverReady: 'Moteur WinDivert : Prêt',
     driverActive: 'Moteur WinDivert : Actif (Filtrage)',
     btnUninstall: 'Désinstaller Service',
-    uninstallConfirm: 'Voulez-vous vraiment désinstaller le service GoodByeFirewall et WinDivert ?',
-    uninstallSuccess: 'Service Windows et pilotes WinDivert désinstallés.',
+    uninstallConfirm: 'Désinstaller le service GoodByeFirewall de cette installation ? Le pilote WinDivert partagé sera conservé.',
+    uninstallSuccess: 'Service GoodByeFirewall désinstallé. Le pilote partagé est conservé.',
+    btnMigrate: 'Migrer ancien service',
+    migrateConfirm: 'Retirer l’ancien service GoodbyeDPI uniquement s’il appartient à cette installation ? Vous pourrez ensuite activer le nouveau service GoodByeFirewall.',
     errStart: 'Erreur lors du démarrage : ',
     tipClose: 'Masquer dans les icônes cachées (Actif en arrière-plan)',
     tipMin: 'Réduire dans la barre des tâches',
@@ -39,8 +41,8 @@ const i18n = {
     logThemeLight: '[Thème] Basculé vers le mode Clair',
     logUninstalling: '[Service] Désinstallation demandée...',
     adminModalTitle: 'Autorisation Administrateur',
-    adminModalDesc: 'Pour activer le contournement DPI et charger le pilote réseau sécurisé <strong>WinDivert</strong>, GoodByeFirewall requiert les privilèges Administrateur. Cette autorisation ne vous sera demandée qu\'une seule fois : GoodByeFirewall sera configuré pour s\'exécuter avec les privilèges requis sans vous redemander confirmation.',
-    adminModalNote: 'Cliquez sur Autoriser pour accorder les privilèges et mémoriser l\'accès permanent.',
+    adminModalDesc: 'Le chargement du pilote <strong>WinDivert</strong> nécessite les privilèges Administrateur. Une installation protégée dans Program Files permet de mémoriser cet accès pour les prochains lancements.',
+    adminModalNote: 'Cliquez sur Autoriser pour redémarrer avec les privilèges nécessaires.',
     adminBtnClose: 'Fermer',
     adminBtnAuthorize: 'Autoriser (UAC)',
     adminAuthorizing: 'Demande en cours...',
@@ -101,8 +103,10 @@ const i18n = {
     driverReady: 'WinDivert Engine: Ready',
     driverActive: 'WinDivert Engine: Active (Filtering)',
     btnUninstall: 'Uninstall Service',
-    uninstallConfirm: 'Do you really want to uninstall GoodByeFirewall and WinDivert services?',
-    uninstallSuccess: 'Windows service and WinDivert drivers uninstalled.',
+    uninstallConfirm: 'Uninstall the GoodByeFirewall service from this installation? The shared WinDivert driver will be preserved.',
+    uninstallSuccess: 'GoodByeFirewall service uninstalled. The shared driver is preserved.',
+    btnMigrate: 'Migrate legacy service',
+    migrateConfirm: 'Remove the legacy GoodbyeDPI service only if it belongs to this installation? You can then enable the new GoodByeFirewall service.',
     errStart: 'Failed to start bypass: ',
     tipClose: 'Hide to notification tray (Active in background)',
     tipMin: 'Minimize to taskbar',
@@ -117,8 +121,8 @@ const i18n = {
     logThemeLight: '[Theme] Switched to Light mode',
     logUninstalling: '[Service] Uninstall requested...',
     adminModalTitle: 'Administrator Privileges',
-    adminModalDesc: 'To enable DPI bypass and load the secure <strong>WinDivert</strong> network driver, GoodByeFirewall requires Administrator privileges. This authorization is only required once: GoodByeFirewall will be configured to run with elevated privileges permanently.',
-    adminModalNote: 'Click Grant Access to allow network privileges and memorize permanent access.',
+    adminModalDesc: 'Loading the <strong>WinDivert</strong> driver requires Administrator privileges. A protected installation in Program Files can remember this access for subsequent launches.',
+    adminModalNote: 'Click Grant Access to restart with the required privileges.',
     adminBtnClose: 'Close',
     adminBtnAuthorize: 'Grant Access (UAC)',
     adminAuthorizing: 'Requesting access...',
@@ -948,8 +952,12 @@ async function handlePowerToggle() {
   try {
     if (isRunning) {
       appendLog(dict.logStopping);
-      await window.api.stopBypass();
-      updateStatusUI(false);
+      const res = await window.api.stopBypass();
+      updateStatusUI(await window.api.checkStatus());
+      if (!res?.success) {
+        appendLog(`[ERROR] ${res?.message}`);
+        alert(res?.message || 'Échec de l’arrêt de la protection.');
+      }
     } else {
       appendLog(dict.logStarting);
       const cfg = getConfigFromUI();
@@ -958,13 +966,14 @@ async function handlePowerToggle() {
       if (!res.success) {
         appendLog(`[ERREUR / ERROR] ${res.message}`);
         alert(dict.errStart + res.message);
-        updateStatusUI(false);
+        updateStatusUI(await window.api.checkStatus());
       } else {
         updateStatusUI(true);
       }
     }
   } catch (err) {
     appendLog(`[Exception] ${err.message}`);
+    alert(err.message || String(err));
   } finally {
     isTogglingPower = false;
   }
@@ -1037,21 +1046,27 @@ async function init() {
     waveEngine.start();
   }
 
-  const savedCfg = await window.api.loadConfig();
-  applyConfigToUI(savedCfg);
+  try {
+    applyConfigToUI(await window.api.loadConfig());
+  } catch (err) {
+    appendLog(`[Config] ${err.message || err}`);
+  }
 
   await initAdminPermissionCheck();
 
-  const initialStatus = await window.api.checkStatus();
-  updateStatusUI(initialStatus);
-
-  window.api.onStatusChange((status) => {
+  await window.api.onStatusChange((status) => {
     updateStatusUI(status);
   });
 
-  window.api.onLog((log) => {
+  await window.api.onLog((log) => {
     appendLog(log);
   });
+
+  try {
+    updateStatusUI(await window.api.checkStatus());
+  } catch (err) {
+    appendLog(`[Status] ${err.message || err}`);
+  }
 
   checkPing();
   pingInterval = setInterval(checkPing, 2500);
@@ -1183,14 +1198,28 @@ async function init() {
     const dict = i18n[currentLang] || i18n.fr;
     if (confirm(dict.uninstallConfirm)) {
       appendLog(dict.logUninstalling);
-      const res = await window.api.uninstallService();
-      updateStatusUI(false);
-      if (res && res.success === false) {
-        alert(res.message || 'Erreur lors de la désinstallation du service.');
-      } else {
-        alert(dict.uninstallSuccess);
+      try {
+        const res = await window.api.uninstallService();
+        updateStatusUI(await window.api.checkStatus());
+        alert(res?.success ? dict.uninstallSuccess : (res?.message || 'Erreur lors de la désinstallation du service.'));
+      } catch (err) {
+        appendLog(`[Service] ${err.message}`);
+        alert(err.message || String(err));
       }
     }
+  });
+
+  const btnMigrate = document.getElementById('btnMigrateService');
+  if (btnMigrate) btnMigrate.addEventListener('click', async () => {
+    const dict = i18n[currentLang] || i18n.fr;
+    if (!confirm(dict.migrateConfirm)) return;
+    btnMigrate.disabled = true;
+    try {
+      const res = await window.api.migrateLegacyService();
+      updateStatusUI(await window.api.checkStatus());
+      alert(res.message);
+    } catch (err) { alert(err.message || String(err)); }
+    finally { btnMigrate.disabled = false; }
   });
 
   // Strictly prevent any window-level scrolling or sliding

@@ -11,6 +11,8 @@
   const trayModeBadge = document.getElementById('trayModeBadge');
   const btnOpenApp = document.getElementById('btnOpenApp');
   const btnQuitApp = document.getElementById('btnQuitApp');
+  const trayLogo = document.querySelector('.tray-logo');
+  if (trayLogo) trayLogo.addEventListener('error', () => { trayLogo.style.display = 'none'; });
 
   let currentConfig = null;
   let isToggling = false;
@@ -84,17 +86,20 @@
           if (currentConfig?.theme) applyTheme(currentConfig.theme);
           const res = await core.invoke('start_bypass', { config: currentConfig });
           if (!res || !res.success) {
-            trayToggleSwitch.checked = false;
-            updateStatus(false, currentConfig);
+            updateStatus(await core.invoke('check_status'), currentConfig);
+            alert(res?.message || 'Échec du démarrage de la protection.');
           } else {
             updateStatus(true, currentConfig);
           }
         } else {
-          await core.invoke('stop_bypass');
-          updateStatus(false, currentConfig);
+          const res = await core.invoke('stop_bypass');
+          updateStatus(await core.invoke('check_status'), currentConfig);
+          if (!res?.success) alert(res?.message || 'Échec de l’arrêt de la protection.');
         }
       } catch (err) {
         console.error('Toggle error:', err);
+        await loadState();
+        alert(err.message || String(err));
       } finally {
         trayToggleSwitch.disabled = false;
         isToggling = false;
@@ -113,13 +118,14 @@
   if (btnQuitApp) {
     btnQuitApp.addEventListener('click', async () => {
       if (core) {
-        await core.invoke('quit_app');
+        try { await core.invoke('quit_app'); }
+        catch (err) { alert(err.message || String(err)); }
       }
     });
   }
 
   if (eventApi) {
-    eventApi.listen('status-changed', async (event) => {
+    await eventApi.listen('status-changed', async (event) => {
       if (!currentConfig && core) {
         try {
           currentConfig = await core.invoke('load_config');
@@ -129,7 +135,7 @@
       updateStatus(event.payload, currentConfig);
     });
 
-    eventApi.listen('theme-changed', (event) => {
+    await eventApi.listen('theme-changed', (event) => {
       if (event && event.payload) {
         applyTheme(event.payload);
         if (currentConfig) {

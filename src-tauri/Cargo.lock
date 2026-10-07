@@ -1421,10 +1421,12 @@ dependencies = [
  "log",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-log",
  "tauri-plugin-notification",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

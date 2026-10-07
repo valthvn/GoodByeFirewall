@@ -1210,6 +1210,8 @@ body.dark-theme .console-log-flow::-webkit-scrollbar-thumb:hover {
 .app-status-bar {
   margin-top: auto;
   display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
   align-items: center;
   justify-content: space-between;
   padding-top: 8px;

@@ -11,6 +11,7 @@
       saveConfig: (config) => core.invoke('save_config', { config }),
       loadConfig: () => core.invoke('load_config'),
       uninstallService: () => core.invoke('uninstall_service'),
+      migrateLegacyService: () => core.invoke('migrate_legacy_service'),
       minimizeWindow: () => core.invoke('minimize_window'),
       closeWindow: () => core.invoke('close_window'),
       checkIsAdmin: () => core.invoke('check_is_admin'),
@@ -19,12 +20,12 @@
 
       onStatusChange: (callback) => {
         if (event && event.listen) {
-          event.listen('status-changed', (evt) => callback(evt.payload));
+          return event.listen('status-changed', (evt) => callback(evt.payload));
         }
       },
       onLog: (callback) => {
         if (event && event.listen) {
-          event.listen('log-message', (evt) => callback(evt.payload));
+          return event.listen('log-message', (evt) => callback(evt.payload));
         }
       }
     };

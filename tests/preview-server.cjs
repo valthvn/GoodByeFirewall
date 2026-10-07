@@ -4,18 +4,15 @@ const fs = require('node:fs');
 const path = require('node:path');
 const root = path.resolve(__dirname, '../renderer');
 const types = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.woff2': 'font/woff2', '.png': 'image/png', '.ico': 'image/x-icon' };
-const bridge = `<script>
-let config = {preset:'-5', ttl:'none', dns:'cloudflare', language:'fr', theme:'light', isServiceMode:false};
-window.api = {
-  loadConfig: async () => config, saveConfig: async cfg => {config = cfg; return true;},
-  checkIsAdmin: async () => true, checkStatus: async () => false,
-  measurePing: async () => 12, onStatusChange() {}, onLog() {},
-  startBypass: async () => ({success:true}), stopBypass: async () => ({success:true}),
-  minimizeWindow() {}, closeWindow() {}, quitApp() {},
-  uninstallService: async () => ({success:true})
-};
-</script>`;
+const bridge = '<script src="/preview-bridge.js"></script>';
+const csp = JSON.parse(fs.readFileSync(path.join(__dirname, '../src-tauri/tauri.conf.json'))).app.security.csp;
 http.createServer((req, res) => {
+  res.setHeader('Content-Security-Policy', csp);
+  if (req.url === '/preview-bridge.js') {
+    res.setHeader('Content-Type', 'text/javascript');
+    res.end(fs.readFileSync(path.join(__dirname, 'preview-bridge.js')));
+    return;
+  }
   const file = path.resolve(root, '.' + new URL(req.url, 'http://localhost').pathname.replace(/\/$/, '/index.html'));
   if (!file.startsWith(root + path.sep)) { res.writeHead(403).end(); return; }
   fs.readFile(file, (err, data) => {

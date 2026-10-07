@@ -9,8 +9,9 @@ function loadRenderer() {
   const timers = new Map();
   let timerId = 0;
   const saved = [];
+  const alerts = [];
   const context = vm.createContext({
-    console, Date,
+    console, Date, alert: message => alerts.push(message),
     setTimeout(fn) { timers.set(++timerId, fn); return timerId; },
     clearTimeout(id) { timers.delete(id); },
     requestAnimationFrame(fn) { timers.set(++timerId, fn); return timerId; },
@@ -37,7 +38,7 @@ function loadRenderer() {
   });
   vm.runInContext(fs.readFileSync('renderer/app.js', 'utf8'), context);
   return {
-    context, elements, saved, writes: () => writes,
+    context, elements, saved, alerts, writes: () => writes,
     async flush() {
       const pending = [...timers.values()]; timers.clear();
       for (const fn of pending) fn();
@@ -55,6 +56,24 @@ test('a burst of logs renders once and retains only the last 500 lines', async (
   assert.equal(lines.length, 500);
   assert.match(lines[0], /line-500$/);
   assert.match(lines[499], /line-999$/);
+});
+
+test('failed stop preserves active status when the backend is still running', async () => {
+  const app = loadRenderer();
+  app.context.window.api.stopBypass = async () => ({ success: false, message: 'Access denied' });
+  app.context.window.api.checkStatus = async () => true;
+  await vm.runInContext('updateStatusUI(true); handlePowerToggle()', app.context);
+  assert.equal(vm.runInContext('isRunning', app.context), true);
+  assert.deepEqual(app.alerts, ['Access denied']);
+});
+
+test('failed start checks real status instead of hiding a still-active service', async () => {
+  const app = loadRenderer();
+  app.context.window.api.startBypass = async () => ({ success: false, message: 'Invalid DNS' });
+  app.context.window.api.checkStatus = async () => true;
+  await vm.runInContext('handlePowerToggle()', app.context);
+  assert.equal(vm.runInContext('isRunning', app.context), true);
+  assert.match(app.alerts[0], /Invalid DNS/);
 });
 
 test('rapid settings edits persist only the latest value', async () => {
