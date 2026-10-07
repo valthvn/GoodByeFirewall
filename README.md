@@ -127,7 +127,7 @@ cargo clippy --locked --all-targets --manifest-path src-tauri/Cargo.toml -- -D w
 cargo fmt --manifest-path src-tauri/Cargo.toml --check
 ```
 
-These tests do not modify system services or load the network driver. See [REVIEW.md](REVIEW.md) for findings, changes, measured renderer improvements and remaining native validation requirements.
+These tests do not modify system services or load the network driver. Driver loading, service startup after a reboot and WebView2 rendering need to be checked with the installed app.
 
 ## License & Attribution
 

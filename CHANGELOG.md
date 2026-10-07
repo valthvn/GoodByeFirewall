@@ -17,4 +17,4 @@
 - Quitting the UI preserves an independent Windows service. Shared WinDivert drivers and foreign processes/services are preserved.
 - Use the explicit legacy-service migration action for an older service belonging to this installation. User-writable installations must be replaced with the new installer; their executable is no longer eligible for remembered elevation.
 
-Native driver, boot and WebView2 validation limits are documented in REVIEW.md.
+Automated tests do not cover live WinDivert filtering, startup at boot or WebView2 rendering.
