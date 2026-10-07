@@ -13,6 +13,37 @@ use tauri::{AppHandle, Emitter, Manager, Window};
 use tauri_plugin_notification::NotificationExt;
 
 const CREATE_NO_WINDOW: u32 = 0x08000000;
+mod service;
+
+fn run_service_command(args: &[&str]) -> Result<String, String> {
+    service::command_output(Command::new("sc.exe")
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output())
+}
+
+fn start_windows_service(bin_path: &str) -> Result<(), String> {
+    let exists = run_service_command(&["query", "GoodByeFirewall"]).is_ok();
+    run_service_command(&[
+        if exists { "config" } else { "create" },
+        "GoodByeFirewall", "binPath=", bin_path, "start=", "auto",
+    ])?;
+    if !exists {
+        let _ = run_service_command(&[
+            "description", "GoodByeFirewall", "GoodByeFirewall Anti-Censorship Service",
+        ]);
+    }
+    run_service_command(&["start", "GoodByeFirewall"])?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let output = run_service_command(&["query", "GoodByeFirewall"])?;
+        if service::is_running(&output) { return Ok(()); }
+        if Instant::now() >= deadline {
+            return Err(format!("Le service n'a pas atteint l'état RUNNING : {}", output.trim()));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
 
 #[derive(Default)]
 struct AppState {
@@ -434,7 +465,7 @@ fn check_status(state: tauri::State<AppState>) -> bool {
             .output();
         if let Ok(o) = out {
             let s = String::from_utf8_lossy(&o.stdout);
-            if s.contains("RUNNING") {
+            if o.status.success() && service::is_running(&s) {
                 return true;
             }
         }
@@ -444,7 +475,7 @@ fn check_status(state: tauri::State<AppState>) -> bool {
             .output();
         if let Ok(o) = out_legacy {
             let s = String::from_utf8_lossy(&o.stdout);
-            return s.contains("RUNNING");
+            return o.status.success() && service::is_running(&s);
         }
     } else {
         let out = Command::new("tasklist.exe")
@@ -559,71 +590,15 @@ async fn start_bypass(
             .creation_flags(CREATE_NO_WINDOW)
             .output();
 
-        let query_out = Command::new("sc.exe")
-            .args(["query", "GoodByeFirewall"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-
-        let service_exists = query_out
-            .map(|o| {
-                let s = String::from_utf8_lossy(&o.stdout);
-                s.contains("STATE") || s.contains("SERVICE_NAME")
-            })
-            .unwrap_or(false);
-
-        if service_exists {
-            let cfg_res = Command::new("sc.exe")
-                .args([
-                    "config",
-                    "GoodByeFirewall",
-                    &format!("binPath= {}", bin_path_val),
-                    "start= auto",
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
-
-            if let Ok(c_out) = cfg_res {
-                if !c_out.status.success() {
-                    let err_msg = String::from_utf8_lossy(&c_out.stderr).to_string();
-                    return Ok(CommandResult {
-                        success: false,
-                        message: format!("Échec configuration service : {}", err_msg),
-                    });
-                }
-            }
-        } else {
-            let create_res = Command::new("sc.exe")
-                .args([
-                    "create",
-                    "GoodByeFirewall",
-                    &format!("binPath= {}", bin_path_val),
-                    "start= auto",
-                ])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
-
-            if let Ok(c_out) = create_res {
-                if !c_out.status.success() {
-                    let err_msg = String::from_utf8_lossy(&c_out.stderr).to_string();
-                    return Ok(CommandResult {
-                        success: false,
-                        message: format!("Échec création service : {}", err_msg),
-                    });
-                }
-            }
-
-            let _ = Command::new("sc.exe")
-                .args(["description", "GoodByeFirewall", "GoodByeFirewall Anti-Censorship Service"])
-                .creation_flags(CREATE_NO_WINDOW)
-                .output();
+        if let Err(err) = start_windows_service(&bin_path_val) {
+            *state.is_protection_running.lock().unwrap() = false;
+            let _ = app.emit("status-changed", false);
+            update_tray_ui(&app, false);
+            return Ok(CommandResult {
+                success: false,
+                message: format!("Échec démarrage service : {}", err),
+            });
         }
-
-        let _ = Command::new("sc.exe")
-            .args(["start", "GoodByeFirewall"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .output();
-
-        std::thread::sleep(Duration::from_millis(300));
 
         *state.is_protection_running.lock().unwrap() = true;
         let _ = app.emit("status-changed", true);
@@ -655,7 +630,7 @@ async fn start_bypass(
                 if let Some(out) = stdout {
                     std::thread::spawn(move || {
                         let reader = BufReader::new(out);
-                        for line in reader.lines().flatten() {
+                        for line in reader.lines().map_while(Result::ok) {
                             let _ = app_stdout.emit("log-message", line);
                         }
                     });
@@ -665,7 +640,7 @@ async fn start_bypass(
                 if let Some(err) = stderr {
                     std::thread::spawn(move || {
                         let reader = BufReader::new(err);
-                        for line in reader.lines().flatten() {
+                        for line in reader.lines().map_while(Result::ok) {
                             let _ = app_stderr.emit("log-message", format!("[ERR] {}", line));
                         }
                     });
@@ -932,6 +907,10 @@ pub fn run() {
             }
 
             let state = app.state::<AppState>();
+            *state.is_service_mode.lock().unwrap() = load_config(app.handle().clone())
+                .get("isServiceMode")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             let initial_running = check_status(state);
             let initial_tooltip = if initial_running {
                 "GoodByeFirewall • Protection Active 🟢"
