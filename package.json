@@ -4,6 +4,7 @@
   "description": "GoodByeFirewall - Modern DPI bypass and firewall circumvention client for Windows (Tauri v2)",
   "private": true,
   "scripts": {
+    "test": "node --test tests/*.test.cjs",
     "dev": "tauri dev",
     "build": "tauri build",
     "tauri": "tauri"

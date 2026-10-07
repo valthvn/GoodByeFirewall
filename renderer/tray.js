@@ -80,10 +80,8 @@
 
       try {
         if (trayToggleSwitch.checked) {
-          if (!currentConfig) {
-            currentConfig = await core.invoke('load_config');
-            if (currentConfig?.theme) applyTheme(currentConfig.theme);
-          }
+          currentConfig = await core.invoke('load_config');
+          if (currentConfig?.theme) applyTheme(currentConfig.theme);
           const res = await core.invoke('start_bypass', { config: currentConfig });
           if (!res || !res.success) {
             trayToggleSwitch.checked = false;

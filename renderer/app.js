@@ -447,7 +447,7 @@ class LiquidAuroraEngine {
 
 let waveEngine = null;
 
-function applyLanguage(lang) {
+function applyLanguage(lang, persist = true) {
   currentLang = (lang === 'en') ? 'en' : 'fr';
   const dict = i18n[currentLang] || i18n.fr;
 
@@ -536,7 +536,7 @@ function applyLanguage(lang) {
   setMode(isServiceMode);
   updateStatusUI(isRunning);
 
-  saveCurrentConfig();
+  if (persist) saveCurrentConfig();
 }
 
 function updateStatusUI(active) {
@@ -812,9 +812,39 @@ function getConfigFromUI() {
   };
 }
 
+let configSaveTimer = null;
+let pendingConfig = null;
+let configSavePromise = null;
+
+function flushConfigSave() {
+  clearTimeout(configSaveTimer);
+  configSaveTimer = null;
+  if (configSavePromise) return configSavePromise;
+  if (!pendingConfig) return Promise.resolve();
+  configSavePromise = (async () => {
+    try {
+      while (pendingConfig) {
+        const cfg = pendingConfig;
+        pendingConfig = null;
+        try {
+          if (!await window.api.saveConfig(cfg)) {
+            appendLog('[Config] Impossible de sauvegarder les paramètres.');
+          }
+        } catch (err) {
+          appendLog(`[Config] ${err.message}`);
+        }
+      }
+    } finally {
+      configSavePromise = null;
+    }
+  })();
+  return configSavePromise;
+}
+
 function saveCurrentConfig() {
-  const cfg = getConfigFromUI();
-  window.api.saveConfig(cfg);
+  pendingConfig = getConfigFromUI();
+  clearTimeout(configSaveTimer);
+  configSaveTimer = setTimeout(flushConfigSave, 250);
 }
 
 function applyConfigToUI(cfg) {
@@ -851,7 +881,7 @@ function applyConfigToUI(cfg) {
   if (cfg.language) {
     currentLang = cfg.language;
     langSelect.value = cfg.language;
-    applyLanguage(cfg.language);
+    applyLanguage(cfg.language, false);
     syncCustomDropdown('containerLang', cfg.language);
   }
 
@@ -883,6 +913,7 @@ function setMode(serviceMode) {
 
 const MAX_LOG_LINES = 500;
 const logBuffer = [];
+let logRenderTimer = null;
 
 function appendLog(message) {
   const time = new Date().toLocaleTimeString();
@@ -890,8 +921,13 @@ function appendLog(message) {
   if (logBuffer.length > MAX_LOG_LINES) {
     logBuffer.shift();
   }
-  terminalLogs.textContent = logBuffer.join('\n');
-  terminalLogs.scrollTop = terminalLogs.scrollHeight;
+  if (logRenderTimer === null) {
+    logRenderTimer = setTimeout(() => {
+      logRenderTimer = null;
+      terminalLogs.textContent = logBuffer.join('\n');
+      terminalLogs.scrollTop = terminalLogs.scrollHeight;
+    }, 100);
+  }
 }
 
 function triggerPowerBounce() {
@@ -917,6 +953,7 @@ async function handlePowerToggle() {
     } else {
       appendLog(dict.logStarting);
       const cfg = getConfigFromUI();
+      await flushConfigSave();
       const res = await window.api.startBypass(cfg);
       if (!res.success) {
         appendLog(`[ERREUR / ERROR] ${res.message}`);
@@ -945,7 +982,8 @@ async function initAdminPermissionCheck() {
   }
 
   if (btnAdminClose) {
-    btnAdminClose.addEventListener('click', () => {
+    btnAdminClose.addEventListener('click', async () => {
+      await flushConfigSave();
       if (window.api && window.api.quitApp) {
         window.api.quitApp();
       } else {
@@ -963,6 +1001,7 @@ async function initAdminPermissionCheck() {
       if (adminModalError) adminModalError.style.display = 'none';
 
       try {
+        await flushConfigSave();
         const res = await window.api.requestAdminElevation();
         if (res && res.success) {
           if (btnAdminAuthorizeText) btnAdminAuthorizeText.textContent = dict.adminSuccess;
@@ -1033,6 +1072,7 @@ async function init() {
   });
 
   window.addEventListener('blur', () => {
+    flushConfigSave();
     if (waveEngine) waveEngine.pause();
   });
 
@@ -1135,6 +1175,7 @@ async function init() {
   btnClose.addEventListener('click', () => {
     const dict = i18n[currentLang] || i18n.fr;
     appendLog(dict.logHidden);
+    flushConfigSave();
     window.api.closeWindow();
   });
 
