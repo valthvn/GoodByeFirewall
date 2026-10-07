@@ -1,6 +1,6 @@
 [package]
 name = "goodbyefirewall"
-version = "1.0.1"
+version = "2.0.0"
 description = "GoodByeFirewall"
 authors = ["Aiyzoxx"]
 license = ""

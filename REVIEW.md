@@ -72,6 +72,8 @@ thread. Une fermeture forcée peut perdre une modification encore en attente.
   **23 tests Rust**, couvrant paramètres, quoting Windows, SCM simulé,
   concurrence, processus de test réels, Job Windows, empreintes et ACL.
 - Compilation du client Windows avec `cargo build --offline --locked`.
+- Installateur NSIS **2.0.0 x64** généré avec `npm run build -- --bundles nsis -- --locked` ; version et ressources du paquet vérifiées.
+  SHA-256 : `3B7DD7599D88CA1C156BA3CA8F810EACCBC920173155A7DC54F131C425AFC71F`.
 - Clippy sur toutes les cibles avec `-D warnings`, rustfmt et syntaxe JavaScript.
 - Le test de DLL appelle uniquement `WinDivertHelperFormatFilter`. Aucun test
   n'ouvre le pilote, ne démarre le daemon réseau, ni ne modifie un service ou

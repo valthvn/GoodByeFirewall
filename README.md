@@ -113,7 +113,7 @@ npm run build
 ```
 
 The compiled installer is output to:
-`src-tauri/target/release/bundle/nsis/GoodByeFirewall_1.0.1_x64-setup.exe`
+`src-tauri/target/release/bundle/nsis/GoodByeFirewall_2.0.0_x64-setup.exe`
 
 ---
 
